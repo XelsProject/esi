@@ -179,34 +179,41 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 	resp, err := netClient.Do(req)
 	//resp, err := netClient.Get(ESIServerConfig.DefaultResolver.Resolve() + url)
 	fmt.Printf("%.2fs Doc Loaded from URL\n", time.Since(start).Seconds())
-	if err != nil {
-		panic(err)
+	if err == nil {
+		//panic(err)
+
+		defer resp.Body.Close()
+
+		delHopHeaders(resp.Header)
+		copyHeader(w.Header(), resp.Header)
+
+		body, err := ioutil.ReadAll(resp.Body)
+		bodyStr := string(body)
+		if err == nil {
+			//pageFragments := make([]string, 0, 20)
+			start = time.Now()
+			tokens := tokenizer.ParseDocument(&bodyStr)
+			fmt.Printf("%.2fs Parsing\n", time.Since(start).Seconds())
+			start = time.Now()
+			astNode, esicalls := ast.GenerateAST(tokens)
+			fmt.Printf("%.2fs AST Generated\n", time.Since(start).Seconds())
+			start = time.Now()
+			GenerateESICalls(esicalls, netClient, ch, r)
+			close(ch)
+			fmt.Printf("%.2fs ESI Calls\n", time.Since(start).Seconds())
+
+			w.WriteHeader(resp.StatusCode)
+			//writeAST(&ast, &w, r)
+			for i := 0; i < len(astNode.Children); i++ {
+				ExecuteAST(astNode.Children[i], &w, r)
+			}
+		} else {
+			w.WriteHeader(500)
+		}
+	} else {
+		w.WriteHeader(500)
 	}
-	defer resp.Body.Close()
 
-	delHopHeaders(resp.Header)
-	copyHeader(w.Header(), resp.Header)
-
-	body, err := ioutil.ReadAll(resp.Body)
-	bodyStr := string(body)
-
-	//pageFragments := make([]string, 0, 20)
-	start = time.Now()
-	tokens := tokenizer.ParseDocument(&bodyStr)
-	fmt.Printf("%.2fs Parsing\n", time.Since(start).Seconds())
-	start = time.Now()
-	astNode, esicalls := ast.GenerateAST(tokens)
-	fmt.Printf("%.2fs AST Generated\n", time.Since(start).Seconds())
-	start = time.Now()
-	GenerateESICalls(esicalls, netClient, ch, r)
-	close(ch)
-	fmt.Printf("%.2fs ESI Calls\n", time.Since(start).Seconds())
-
-	w.WriteHeader(resp.StatusCode)
-	//writeAST(&ast, &w, r)
-	for i := 0; i < len(astNode.Children); i++ {
-		ExecuteAST(astNode.Children[i], &w, r)
-	}
 	//printAST(&ast, 0)
 	//w.Write(body)
 }
