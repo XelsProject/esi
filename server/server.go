@@ -16,6 +16,7 @@ import (
 // Hop-by-hop headers. These are removed when sent to the backend.
 // http://www.w3.org/Protocols/rfc2616/rfc2616-sec13.html
 var hopHeaders = []string{
+	"Accept-Encoding", //needs to be removed as well, since it causes odd behaviors in http transports
 	"Connection",
 	"Keep-Alive",
 	"Proxy-Authenticate",
