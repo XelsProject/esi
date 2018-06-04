@@ -3,11 +3,7 @@ package ast
 import (
 	"esi/tokenizer"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"strconv"
 	"strings"
-	"time"
 )
 
 //ASTAttributeNode
@@ -29,11 +25,11 @@ type ASTNode struct {
 //ESIIncludeData
 type EsiIncludeData struct {
 	ASTData           *ASTNode
-	url               *string
-	ttl               int
-	response          *string
+	URL               *string
+	TTL               int
+	Response          *string
 	varParsedResponse string
-	responseCode      int
+	ResponseCode      int
 }
 
 func GenerateAST(tokens []tokenizer.TokenData) (ASTNode, []EsiIncludeData) {
@@ -119,81 +115,4 @@ func PrintAST(root *ASTNode, level int) {
 			PrintAST(root.Children[i], level+1)
 		}
 	}
-}
-
-func GenerateESICalls(EsiData []EsiIncludeData, netClient *http.Client, ch chan string) {
-	calls := 0
-	for i := 0; i < len(EsiData); i++ {
-		for i2 := 0; i2 < len(EsiData[i].ASTData.Attributes); i2++ {
-			if *EsiData[i].ASTData.Attributes[i2].Name == "src" {
-				EsiData[i].url = EsiData[i].ASTData.Attributes[i2].Value
-				//================================================================
-				//fmt.Println("Getting...", *EsiData[i].url)
-				calls++
-				go MakeRequest(&EsiData[i], *EsiData[i].url, netClient, ch)
-				/*
-					resp, err := netClient.Get(*EsiData[i].url)
-					if err != nil {
-						panic(err)
-					}
-					defer resp.Body.Close()
-					body, err := ioutil.ReadAll(resp.Body)
-					bodyStr := string(body)
-					EsiData[i].response = &bodyStr
-				*/
-				//runes := []rune(bodyStr)
-				//================================================================
-			} else if *EsiData[i].ASTData.Attributes[i2].Name == "ttl" {
-				EsiData[i].ttl, _ = strconv.Atoi(*EsiData[i].ASTData.Attributes[i2].Name)
-			}
-		}
-	}
-	for i := 0; i < calls; i++ {
-		a := <-ch
-		fmt.Println(a)
-	}
-}
-
-func MakeRequest(esiData *EsiIncludeData, url string, netClient *http.Client, ch chan<- string) {
-	start := time.Now()
-	resp, _ := netClient.Get(url)
-
-	secs := time.Since(start).Seconds()
-	body, _ := ioutil.ReadAll(resp.Body)
-	bodyStr := string(body)
-	esiData.response = &bodyStr
-	ch <- fmt.Sprintf("%.2f elapsed with response length: %d %s", secs, len(body), url)
-
-	tokens := tokenizer.ParseDocument(&bodyStr)
-	fmt.Printf("%.2fs Parsing\n", time.Since(start).Seconds())
-	start = time.Now()
-	ast, esicalls := GenerateAST(tokens)
-
-	//attach AST to tree
-	esiData.ASTData.Children = append(esiData.ASTData.Children, &ast)
-
-	fmt.Printf("%.2fs AST Generated\n", time.Since(start).Seconds())
-	start = time.Now()
-
-	ch2 := make(chan string)
-	GenerateESICalls(esicalls, netClient, ch2)
-	close(ch2)
-}
-
-func ExecuteAST(node *ASTNode, w *http.ResponseWriter, r *http.Request) {
-	//if node.Token.TokenType == Root {
-	//}
-	if node.Token.TokenType == tokenizer.Text {
-		if node.TagValue != nil && *node.TagValue != "" {
-			fmt.Fprint(*w, *node.TagValue)
-			//r.Write(*node.TagValue)
-		}
-	}
-
-	//if node.Token.TokenType == Root {
-	for i := 0; i < len(node.Children); i++ {
-		//fmt.Println("Recursing...", node.Token.TokenType)
-		ExecuteAST(node.Children[i], w, r)
-	}
-	//}
 }
