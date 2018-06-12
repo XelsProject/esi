@@ -193,6 +193,7 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 		appendHostToXForwardHeader(r.Header, clientIP)
 	}
 	resolvedURL, _ := ESIServerConfig.DefaultResolver.Resolve(&r.URL.Host)
+	fmt.Println("Resolved URL - " + resolvedURL)
 	req, err := http.NewRequest(r.Method, resolvedURL+urlPath, nil)
 	req.Header = r.Header
 	resp, err := netClient.Do(req)
@@ -261,7 +262,7 @@ func (t DefaultResolveEntry) Resolve(passedURL *string) (string, bool) {
 	//quick and dirty - faster way would be getting everything between
 	//second and third slash in a single iteration and using the slices to rebuild the string
 	parsedURL, _ := url.Parse(*passedURL)
-	strUrl := parsedURL.Scheme + "://" + t.URI + parsedURL.Path
+	strUrl := "http://" + t.URI + parsedURL.Path
 	if parsedURL.RawQuery != "" {
 		strUrl = strUrl + "?" + parsedURL.RawQuery
 	}
