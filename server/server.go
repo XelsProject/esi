@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -84,9 +85,23 @@ func GenerateESICalls(EsiData []ast.EsiIncludeData, netClient *http.Client, ch c
 	}
 }
 
-func MakeRequest(esiData *ast.EsiIncludeData, url string, netClient *http.Client, ch chan<- string, r *http.Request) {
+func resolveURL(esiURL *string) *string {
+	for i := 0; i < len(ESIServerConfig.CallResolvers); i++ {
+		resolvedURL, handled := ESIServerConfig.CallResolvers[i].Resolve(esiURL)
+		if handled {
+			return &resolvedURL
+		}
+	}
+	return esiURL
+}
+
+func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, netClient *http.Client, ch chan<- string, r *http.Request) {
 	start := time.Now()
 
+	//do any URL rewrite needed
+	//u, _ := url.Parse(esiUrl)
+
+	resolvedURL := resolveURL(&esiURL)
 	//handle before ESI call handlers
 	for i := 0; i < len(ESIServerConfig.BeforeESICall); i++ {
 		ESIServerConfig.BeforeESICall[i].OnBeforeESICall(esiData)
@@ -96,7 +111,10 @@ func MakeRequest(esiData *ast.EsiIncludeData, url string, netClient *http.Client
 	handled := false
 
 	if ESIServerConfig.Cache != nil {
-		cacheResp := ESIServerConfig.Cache.Get(url)
+		//currently sending the resolvedURL
+		// this is in case the resolver has multiple backends that could be out of sync
+		// different backend, different cache result.
+		cacheResp := ESIServerConfig.Cache.Get(*resolvedURL)
 		if cacheResp != nil {
 			handled = true
 			esiData.Response = cacheResp
@@ -106,7 +124,7 @@ func MakeRequest(esiData *ast.EsiIncludeData, url string, netClient *http.Client
 
 	}
 	if !handled {
-		req, _ := http.NewRequest("GET", url, nil)
+		req, _ := http.NewRequest("GET", *resolvedURL, nil)
 		req.Header = r.Header
 		resp, _ := netClient.Do(req)
 
@@ -115,7 +133,7 @@ func MakeRequest(esiData *ast.EsiIncludeData, url string, netClient *http.Client
 		esiData.Response = &bodyStr
 		esiData.ResponseCode = resp.StatusCode
 		if ESIServerConfig.Cache != nil {
-			ESIServerConfig.Cache.Set(url, esiData.Response, esiData.TTL)
+			ESIServerConfig.Cache.Set(*resolvedURL, esiData.Response, esiData.TTL)
 		}
 	}
 	secs := time.Since(start).Seconds()
@@ -124,7 +142,7 @@ func MakeRequest(esiData *ast.EsiIncludeData, url string, netClient *http.Client
 	for i := 0; i < len(ESIServerConfig.AfterESICall); i++ {
 		ESIServerConfig.AfterESICall[i].OnAfterESICall(esiData)
 	}
-	ch <- fmt.Sprintf("%.2f elapsed with response length: %d %s", secs, len(*esiData.Response), url)
+	ch <- fmt.Sprintf("%.2f elapsed with response length: %d %s %s", secs, len(*esiData.Response), esiURL, resolvedURL)
 
 	tokens := tokenizer.ParseDocument(esiData.Response)
 	fmt.Printf("%.2fs Parsing\n", time.Since(start).Seconds())
@@ -163,7 +181,7 @@ func ExecuteAST(node *ast.ASTNode, w *http.ResponseWriter, r *http.Request) {
 func getDocs(w http.ResponseWriter, r *http.Request) {
 
 	ch := make(chan string)
-	url := r.URL.Path
+	urlPath := r.URL.Path
 
 	var netClient = &http.Client{
 		Timeout: time.Second * 10,
@@ -174,7 +192,8 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 	if clientIP, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		appendHostToXForwardHeader(r.Header, clientIP)
 	}
-	req, err := http.NewRequest(r.Method, ESIServerConfig.DefaultResolver.Resolve()+url, nil)
+	resolvedURL, _ := ESIServerConfig.DefaultResolver.Resolve(&r.URL.Host)
+	req, err := http.NewRequest(r.Method, resolvedURL+urlPath, nil)
 	req.Header = r.Header
 	resp, err := netClient.Do(req)
 	//resp, err := netClient.Get(ESIServerConfig.DefaultResolver.Resolve() + url)
@@ -230,16 +249,26 @@ func (t DefaultHealthCheck) Healthy() bool {
 }
 
 type IResolveEntry interface {
-	Resolve() string
+	Resolve(passedURL *string) (string, bool)
 }
 
-type ResolveEntry struct {
+type DefaultResolveEntry struct {
 	URI     string
 	Healthy IHealthCheck
 }
 
-func (t ResolveEntry) Resolve() string {
-	return t.URI
+func (t DefaultResolveEntry) Resolve(passedURL *string) (string, bool) {
+	//quick and dirty - faster way would be getting everything between
+	//second and third slash in a single iteration and using the slices to rebuild the string
+	parsedURL, _ := url.Parse(*passedURL)
+	strUrl := parsedURL.Scheme + "://" + t.URI + parsedURL.Path
+	if parsedURL.RawQuery != "" {
+		strUrl = strUrl + "?" + parsedURL.RawQuery
+	}
+	if parsedURL.Fragment != "" {
+		strUrl = strUrl + "#" + parsedURL.Fragment
+	}
+	return strUrl, true
 }
 
 type IBeforeESICall interface {
@@ -257,8 +286,8 @@ type ICache interface {
 }
 
 type ServerConfig struct {
-	DefaultResolver ResolveEntry
-	CallResolvers   []ResolveEntry
+	DefaultResolver IResolveEntry
+	CallResolvers   []IResolveEntry
 	AfterESICall    []IAfterESICall
 	BeforeESICall   []IBeforeESICall
 	Cache           ICache
