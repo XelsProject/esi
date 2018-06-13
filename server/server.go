@@ -128,12 +128,18 @@ func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, netClient *http.Cli
 		req.Header = r.Header
 		resp, _ := netClient.Do(req)
 
-		body, _ := ioutil.ReadAll(resp.Body)
-		bodyStr := string(body)
-		esiData.Response = &bodyStr
+		body, errBody := ioutil.ReadAll(resp.Body)
 		esiData.ResponseCode = resp.StatusCode
-		if ESIServerConfig.Cache != nil {
-			ESIServerConfig.Cache.Set(*resolvedURL, esiData.Response, esiData.TTL)
+		if errBody == nil {
+			bodyStr := string(body)
+			esiData.Response = &bodyStr
+			if ESIServerConfig.Cache != nil {
+				ESIServerConfig.Cache.Set(*resolvedURL, esiData.Response, esiData.TTL)
+			}
+		} else {
+			var str = ""
+			esiData.Response = &str
+			fmt.Sprintln("Error retrieving body - " + *resolvedURL)
 		}
 	}
 	secs := time.Since(start).Seconds()
