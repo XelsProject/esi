@@ -80,8 +80,8 @@ func GenerateESICalls(EsiData []ast.EsiIncludeData, netClient *http.Client, ch c
 		}
 	}
 	for i := 0; i < calls; i++ {
-		a := <-ch
-		fmt.Println(a)
+		_ = <-ch
+		//fmt.Println(a)
 	}
 }
 
@@ -96,7 +96,7 @@ func resolveURL(esiURL *string) *string {
 }
 
 func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, netClient *http.Client, ch chan<- string, r *http.Request) {
-	start := time.Now()
+	//start := time.Now()
 
 	//do any URL rewrite needed
 	//u, _ := url.Parse(esiUrl)
@@ -124,42 +124,56 @@ func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, netClient *http.Cli
 
 	}
 	if !handled {
-		req, _ := http.NewRequest("GET", *resolvedURL, nil)
-		req.Header = r.Header
-		resp, _ := netClient.Do(req)
-
-		body, errBody := ioutil.ReadAll(resp.Body)
-		esiData.ResponseCode = resp.StatusCode
-		if errBody == nil {
-			bodyStr := string(body)
-			esiData.Response = &bodyStr
-			if ESIServerConfig.Cache != nil {
-				ESIServerConfig.Cache.Set(*resolvedURL, esiData.Response, esiData.TTL)
+		req, reqError := http.NewRequest("GET", *resolvedURL, nil)
+		if reqError != nil {
+			if ESIServerConfig.Logger != nil {
+				ESIServerConfig.Logger.Log("Error creating request - "+*resolvedURL+" - "+reqError.Error(), "Error")
 			}
 		} else {
-			var str = ""
-			esiData.Response = &str
-			fmt.Sprintln("Error retrieving body - " + *resolvedURL)
+			req.Header = r.Header
+			resp, respErr := netClient.Do(req)
+			if respErr != nil {
+				if ESIServerConfig.Logger != nil {
+					ESIServerConfig.Logger.Log("Error requesting - "+*resolvedURL, "Error")
+				}
+			} else {
+				body, errBody := ioutil.ReadAll(resp.Body)
+				esiData.ResponseCode = resp.StatusCode
+				if errBody == nil {
+					bodyStr := string(body)
+					esiData.Response = &bodyStr
+					if ESIServerConfig.Cache != nil {
+						ESIServerConfig.Cache.Set(*resolvedURL, esiData.Response, esiData.TTL)
+					}
+				} else {
+					var str = ""
+					esiData.Response = &str
+					if ESIServerConfig.Logger != nil {
+						ESIServerConfig.Logger.Log("Error retrieving body - "+*resolvedURL+" - "+errBody.Error(), "Error")
+					}
+					fmt.Sprintln("Error retrieving body - " + *resolvedURL)
+				}
+			}
 		}
 	}
-	secs := time.Since(start).Seconds()
+	//secs := time.Since(start).Seconds()
 
 	//handle after ESI call handlers
 	for i := 0; i < len(ESIServerConfig.AfterESICall); i++ {
 		ESIServerConfig.AfterESICall[i].OnAfterESICall(esiData)
 	}
-	ch <- fmt.Sprintf("%.2f elapsed with response length: %d %s %s", secs, len(*esiData.Response), esiURL, resolvedURL)
-
+	//ch <- fmt.Sprintf("%.2f elapsed with response length: %d %s %s", secs, len(*esiData.Response), esiURL, *resolvedURL)
+	ch <- "OK"
 	tokens := tokenizer.ParseDocument(esiData.Response)
-	fmt.Printf("%.2fs Parsing\n", time.Since(start).Seconds())
-	start = time.Now()
+	//fmt.Printf("%.2fs Parsing\n", time.Since(start).Seconds())
+	//start = time.Now()
 	astree, esicalls := ast.GenerateAST(tokens)
 
 	//attach AST to tree
 	esiData.ASTData.Children = append(esiData.ASTData.Children, &astree)
 
-	fmt.Printf("%.2fs AST Generated\n", time.Since(start).Seconds())
-	start = time.Now()
+	//fmt.Printf("%.2fs AST Generated\n", time.Since(start).Seconds())
+	//start = time.Now()
 
 	ch2 := make(chan string)
 	GenerateESICalls(esicalls, netClient, ch2, r)
@@ -175,7 +189,6 @@ func ExecuteAST(node *ast.ASTNode, w *http.ResponseWriter, r *http.Request) {
 			//r.Write(*node.TagValue)
 		}
 	}
-
 	//if node.Token.TokenType == Root {
 	for i := 0; i < len(node.Children); i++ {
 		//fmt.Println("Recursing...", node.Token.TokenType)
@@ -199,12 +212,14 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 		appendHostToXForwardHeader(r.Header, clientIP)
 	}
 	resolvedURL, _ := ESIServerConfig.DefaultResolver.Resolve(&r.URL.Host)
-	fmt.Println("Resolved URL - " + resolvedURL)
+	if ESIServerConfig.DebugOutput == true {
+		fmt.Println("Resolved URL - " + resolvedURL)
+	}
 	req, err := http.NewRequest(r.Method, resolvedURL+urlPath, nil)
 	req.Header = r.Header
 	resp, err := netClient.Do(req)
 	//resp, err := netClient.Get(ESIServerConfig.DefaultResolver.Resolve() + url)
-	fmt.Printf("%.2fs Doc Loaded from URL\n", time.Since(start).Seconds())
+	//fmt.Printf("%.2fs Doc Loaded from URL\n", time.Since(start).Seconds())
 	if err == nil {
 		//panic(err)
 
@@ -215,28 +230,42 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 
 		body, err := ioutil.ReadAll(resp.Body)
 		bodyStr := string(body)
+		var astNode ast.ASTNode
+		var esicalls []ast.EsiIncludeData
 		if err == nil {
 			//pageFragments := make([]string, 0, 20)
-			start = time.Now()
-			tokens := tokenizer.ParseDocument(&bodyStr)
-			fmt.Printf("%.2fs Parsing\n", time.Since(start).Seconds())
-			start = time.Now()
-			astNode, esicalls := ast.GenerateAST(tokens)
-			fmt.Printf("%.2fs AST Generated\n", time.Since(start).Seconds())
-			start = time.Now()
-			GenerateESICalls(esicalls, netClient, ch, r)
-			close(ch)
-			fmt.Printf("%.2fs ESI Calls\n", time.Since(start).Seconds())
-
+			if ESIServerConfig.DebugOutput == true {
+				start = time.Now()
+				tokens := tokenizer.ParseDocument(&bodyStr)
+				fmt.Printf("%.2fs Parsing\n", time.Since(start).Seconds())
+				start = time.Now()
+				astNode, esicalls = ast.GenerateAST(tokens)
+				fmt.Printf("%.2fs AST Generated\n", time.Since(start).Seconds())
+				start = time.Now()
+				GenerateESICalls(esicalls, netClient, ch, r)
+				close(ch)
+				fmt.Printf("%.2fs ESI Calls\n", time.Since(start).Seconds())
+			} else {
+				tokens := tokenizer.ParseDocument(&bodyStr)
+				astNode, esicalls = ast.GenerateAST(tokens)
+				GenerateESICalls(esicalls, netClient, ch, r)
+				close(ch)
+			}
 			w.WriteHeader(resp.StatusCode)
 			//writeAST(&ast, &w, r)
 			for i := 0; i < len(astNode.Children); i++ {
 				ExecuteAST(astNode.Children[i], &w, r)
 			}
 		} else {
+			if ESIServerConfig.Logger != nil {
+				ESIServerConfig.Logger.Log("Error reading primary body - "+resolvedURL+" - "+err.Error(), "Error")
+			}
 			w.WriteHeader(500)
 		}
 	} else {
+		if ESIServerConfig.Logger != nil {
+			ESIServerConfig.Logger.Log("Error on primary request - "+resolvedURL+" - "+err.Error(), "Error")
+		}
 		w.WriteHeader(500)
 	}
 
@@ -257,6 +286,10 @@ func (t DefaultHealthCheck) Healthy() bool {
 
 type IResolveEntry interface {
 	Resolve(passedURL *string) (string, bool)
+}
+
+type ILogger interface {
+	Log(Message string, Severity string)
 }
 
 type DefaultResolveEntry struct {
@@ -298,13 +331,15 @@ type ServerConfig struct {
 	AfterESICall    []IAfterESICall
 	BeforeESICall   []IBeforeESICall
 	Cache           ICache
+	DebugOutput     bool
+	Logger          ILogger
 }
 
 var ESIServerConfig ServerConfig
 
 func StartServer(address string, serverConfig ServerConfig) {
 	ESIServerConfig = serverConfig
-	fmt.Printf("Starting HTTP")
+	fmt.Printf("Starting HTTP\n")
 	router := http.NewServeMux()
 	router.HandleFunc("/", getDocs)
 	server := http.Server{
