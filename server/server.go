@@ -4,7 +4,6 @@ import (
 	"esi/ast"
 	"esi/tokenizer"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -137,12 +136,12 @@ func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, ch chan<- string, r
 			resp, respErr := netClient.Do(req)
 			if respErr != nil {
 				//inside the if to get rid of the warning...
-				defer resp.Body.Close()
+				//defer resp.Body.Close()
 				if ESIServerConfig.Logger != nil {
 					ESIServerConfig.Logger.Log("Error requesting - "+*resolvedURL, "Error")
 				}
 				//unclear if still need to do this
-				io.Copy(ioutil.Discard, resp.Body)
+				//io.Copy(ioutil.Discard, resp.Body)
 			} else {
 				defer resp.Body.Close()
 				body, errBody := ioutil.ReadAll(resp.Body)
@@ -226,20 +225,20 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 	req, err := http.NewRequest(r.Method, resolvedURL+urlPath, nil)
 	req.Header = r.Header
 	resp, err := netClient.Do(req)
-	defer resp.Body.Close()
 	//resp, err := netClient.Get(ESIServerConfig.DefaultResolver.Resolve() + url)
 	//fmt.Printf("%.2fs Doc Loaded from URL\n", time.Since(start).Seconds())
 	if err == nil {
+		defer resp.Body.Close()
 		//panic(err)
 
 		delHopHeaders(resp.Header)
 		copyHeader(w.Header(), resp.Header)
 
 		body, err := ioutil.ReadAll(resp.Body)
-		bodyStr := string(body)
-		var astNode ast.ASTNode
-		var esicalls []ast.EsiIncludeData
 		if err == nil {
+			bodyStr := string(body)
+			var astNode ast.ASTNode
+			var esicalls []ast.EsiIncludeData
 			//pageFragments := make([]string, 0, 20)
 			if ESIServerConfig.DebugOutput == true {
 				start = time.Now()
@@ -269,7 +268,7 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 			}
 			w.WriteHeader(500)
 			//unclear if we still need to do this
-			io.Copy(ioutil.Discard, resp.Body)
+			//io.Copy(ioutil.Discard, resp.Body)
 		}
 	} else {
 		if ESIServerConfig.Logger != nil {
