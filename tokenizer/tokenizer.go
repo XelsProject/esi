@@ -113,72 +113,75 @@ func ParseDocument(doc *string) []TokenData {
 	tokens := make([]TokenData, 0, 20)
 	inVars := false
 	//_ -> index
-	runes := []rune(*doc)
+	if(doc != nil)
+	{
+		runes := []rune(*doc)
 
-	//for index, runeValue := range runes {
-	handled := false
-	for i := 0; i < len(runes); i++ {
-		handled = false
-		runeString := string(runes[i])
-		if runeString == "<" && i < len(runes)-5 {
-			//fmt.Println(i)
-			substr := string(runes[i : i+5])
-			if substr == "<esi:" {
-				handled = true
-				if i > 0 {
-					textBuffer := string(runes[lastIndex:i])
-					if inVars == true {
+		//for index, runeValue := range runes {
+		handled := false
+		for i := 0; i < len(runes); i++ {
+			handled = false
+			runeString := string(runes[i])
+			if runeString == "<" && i < len(runes)-5 {
+				//fmt.Println(i)
+				substr := string(runes[i : i+5])
+				if substr == "<esi:" {
+					handled = true
+					if i > 0 {
+						textBuffer := string(runes[lastIndex:i])
+						if inVars == true {
 
-					} else {
-						tokens = append(tokens, TokenData{TokenType: Text, Data: textBuffer})
+						} else {
+							tokens = append(tokens, TokenData{TokenType: Text, Data: textBuffer})
+						}
 					}
-				}
-				//fmt.Println("ESI FOUND")
-				i = i + 5
-				tokens = append(tokens, TokenData{TokenType: EsiStartTag, Data: "<esi:"})
-				tokens = readEsiTag(tokens, &i, &runes)
-				lastIndex = i + 1
-				//read the esi tag
-				/*
-					assi gn
-					incl ud e
-					vars
-				*/
-				// <esi:when test="$exists($(accessGranted{'MinuteCast'}))">
-				// also, !$exists, wtf...
-				// EsiCheckAccessCondition(string rule, bool? flip) => $"{FlipChar(flip)}$exists($(accessGranted{{'{rule}'}}))";
-
-				// <esi:choose
-			} else if substr == "</esi" && i < len(runes)-6 {
-				handled = true
-				//fmt.Println("ESI END FOUND")
-				if i > 0 {
-					textBuffer := string(runes[lastIndex:i])
-					if inVars == true {
-
-					} else {
-						tokens = append(tokens, TokenData{TokenType: Text, Data: textBuffer})
-					}
-				}
-				substr := string(runes[i+5 : i+6])
-				//fmt.Println(substr)
-				if substr == ":" {
-					//fmt.Println("ESI END FOUND")
-					tokens = append(tokens, TokenData{TokenType: EsiClose, Data: "</esi:"})
-					i = i + 6
+					//fmt.Println("ESI FOUND")
+					i = i + 5
+					tokens = append(tokens, TokenData{TokenType: EsiStartTag, Data: "<esi:"})
 					tokens = readEsiTag(tokens, &i, &runes)
 					lastIndex = i + 1
-				}
-			}
-			//pageFragments = append(pageFragments, runeString)
-		}
-		//_ = pageFragments
-		i2 = i2 + 1
-	}
-	if !handled {
-		textBuffer := string(runes[lastIndex:])
-		tokens = append(tokens, TokenData{TokenType: Text, Data: textBuffer})
+					//read the esi tag
+					/*
+						assi gn
+						incl ud e
+						vars
+					*/
+					// <esi:when test="$exists($(accessGranted{'MinuteCast'}))">
+					// also, !$exists, wtf...
+					// EsiCheckAccessCondition(string rule, bool? flip) => $"{FlipChar(flip)}$exists($(accessGranted{{'{rule}'}}))";
 
+					// <esi:choose
+				} else if substr == "</esi" && i < len(runes)-6 {
+					handled = true
+					//fmt.Println("ESI END FOUND")
+					if i > 0 {
+						textBuffer := string(runes[lastIndex:i])
+						if inVars == true {
+
+						} else {
+							tokens = append(tokens, TokenData{TokenType: Text, Data: textBuffer})
+						}
+					}
+					substr := string(runes[i+5 : i+6])
+					//fmt.Println(substr)
+					if substr == ":" {
+						//fmt.Println("ESI END FOUND")
+						tokens = append(tokens, TokenData{TokenType: EsiClose, Data: "</esi:"})
+						i = i + 6
+						tokens = readEsiTag(tokens, &i, &runes)
+						lastIndex = i + 1
+					}
+				}
+				//pageFragments = append(pageFragments, runeString)
+			}
+			//_ = pageFragments
+			i2 = i2 + 1
+		}
+		if !handled {
+			textBuffer := string(runes[lastIndex:])
+			tokens = append(tokens, TokenData{TokenType: Text, Data: textBuffer})
+
+		}
 	}
 	return tokens
 }
