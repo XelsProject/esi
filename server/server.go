@@ -4,6 +4,7 @@ import (
 	"esi/ast"
 	"esi/tokenizer"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"time"
 )
+
+var netClient *http.Client
 
 //https://gist.github.com/yowu/f7dc34bd4736a65ff28d
 // Hop-by-hop headers. These are removed when sent to the backend.
@@ -52,7 +55,7 @@ func appendHostToXForwardHeader(header http.Header, host string) {
 	header.Set("X-Forwarded-For", host)
 }
 
-func GenerateESICalls(EsiData []ast.EsiIncludeData, netClient *http.Client, ch chan string, r *http.Request) {
+func GenerateESICalls(EsiData []ast.EsiIncludeData, ch chan string, r *http.Request) {
 	calls := 0
 	for i := 0; i < len(EsiData); i++ {
 		for i2 := 0; i2 < len(EsiData[i].ASTData.Attributes); i2++ {
@@ -61,7 +64,7 @@ func GenerateESICalls(EsiData []ast.EsiIncludeData, netClient *http.Client, ch c
 				//================================================================
 				//fmt.Println("Getting...", *EsiData[i].url)
 				calls++
-				go MakeRequest(&EsiData[i], *EsiData[i].URL, netClient, ch, r)
+				go MakeRequest(&EsiData[i], *EsiData[i].URL, ch, r)
 				/*
 					resp, err := netClient.Get(*EsiData[i].url)
 					if err != nil {
@@ -95,7 +98,7 @@ func resolveURL(esiURL *string) *string {
 	return esiURL
 }
 
-func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, netClient *http.Client, ch chan<- string, r *http.Request) {
+func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, ch chan<- string, r *http.Request) {
 	//start := time.Now()
 
 	//do any URL rewrite needed
@@ -133,10 +136,15 @@ func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, netClient *http.Cli
 			req.Header = r.Header
 			resp, respErr := netClient.Do(req)
 			if respErr != nil {
+				//inside the if to get rid of the warning...
+				defer resp.Body.Close()
 				if ESIServerConfig.Logger != nil {
 					ESIServerConfig.Logger.Log("Error requesting - "+*resolvedURL, "Error")
 				}
+				//unclear if still need to do this
+				io.Copy(ioutil.Discard, resp.Body)
 			} else {
+				defer resp.Body.Close()
 				body, errBody := ioutil.ReadAll(resp.Body)
 				esiData.ResponseCode = resp.StatusCode
 				if errBody == nil {
@@ -176,7 +184,7 @@ func MakeRequest(esiData *ast.EsiIncludeData, esiURL string, netClient *http.Cli
 	//start = time.Now()
 
 	ch2 := make(chan string)
-	GenerateESICalls(esicalls, netClient, ch2, r)
+	GenerateESICalls(esicalls, ch2, r)
 	close(ch2)
 }
 
@@ -218,12 +226,11 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 	req, err := http.NewRequest(r.Method, resolvedURL+urlPath, nil)
 	req.Header = r.Header
 	resp, err := netClient.Do(req)
+	defer resp.Body.Close()
 	//resp, err := netClient.Get(ESIServerConfig.DefaultResolver.Resolve() + url)
 	//fmt.Printf("%.2fs Doc Loaded from URL\n", time.Since(start).Seconds())
 	if err == nil {
 		//panic(err)
-
-		defer resp.Body.Close()
 
 		delHopHeaders(resp.Header)
 		copyHeader(w.Header(), resp.Header)
@@ -242,13 +249,13 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 				astNode, esicalls = ast.GenerateAST(tokens)
 				fmt.Printf("%.2fs AST Generated\n", time.Since(start).Seconds())
 				start = time.Now()
-				GenerateESICalls(esicalls, netClient, ch, r)
+				GenerateESICalls(esicalls, ch, r)
 				close(ch)
 				fmt.Printf("%.2fs ESI Calls\n", time.Since(start).Seconds())
 			} else {
 				tokens := tokenizer.ParseDocument(&bodyStr)
 				astNode, esicalls = ast.GenerateAST(tokens)
-				GenerateESICalls(esicalls, netClient, ch, r)
+				GenerateESICalls(esicalls, ch, r)
 				close(ch)
 			}
 			w.WriteHeader(resp.StatusCode)
@@ -261,6 +268,8 @@ func getDocs(w http.ResponseWriter, r *http.Request) {
 				ESIServerConfig.Logger.Log("Error reading primary body - "+resolvedURL+" - "+err.Error(), "Error")
 			}
 			w.WriteHeader(500)
+			//unclear if we still need to do this
+			io.Copy(ioutil.Discard, resp.Body)
 		}
 	} else {
 		if ESIServerConfig.Logger != nil {
@@ -338,6 +347,18 @@ type ServerConfig struct {
 var ESIServerConfig ServerConfig
 
 func StartServer(address string, serverConfig ServerConfig) {
+	//http://tleyden.github.io/blog/2016/11/21/tuning-the-go-http-client-library-for-load-testing/
+	defaultRoundTripper := http.DefaultTransport
+	defaultTransportPointer, ok := defaultRoundTripper.(*http.Transport)
+	if !ok {
+		panic(fmt.Sprintf("defaultRoundTripper not an *http.Transport"))
+	}
+	defaultTransport := *defaultTransportPointer // dereference it to get a copy of the struct that the pointer points to
+	defaultTransport.MaxIdleConns = 500
+	defaultTransport.MaxIdleConnsPerHost = 500
+
+	netClient = &http.Client{Transport: &defaultTransport}
+
 	ESIServerConfig = serverConfig
 	fmt.Printf("Starting HTTP\n")
 	router := http.NewServeMux()
