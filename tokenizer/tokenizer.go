@@ -113,8 +113,7 @@ func ParseDocument(doc *string) []TokenData {
 	tokens := make([]TokenData, 0, 20)
 	inVars := false
 	//_ -> index
-	if(doc != nil)
-	{
+	if doc != nil {
 		runes := []rune(*doc)
 
 		//for index, runeValue := range runes {
