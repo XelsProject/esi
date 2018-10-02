@@ -514,6 +514,7 @@ type ServerConfig struct {
 	Cache           ICache
 	DebugOutput     bool
 	Logger          ILogger
+	ClientTimeoutMs int
 }
 
 var ESIServerConfig ServerConfig
@@ -534,8 +535,15 @@ func StartServer(address string, serverConfig ServerConfig) {
 	defaultTransport.MaxIdleConnsPerHost = 10
 	//defaultTransport.IdleConnTimeout = time.Second * 10
 
-	netClient = &http.Client{Transport: &defaultTransport, Timeout: time.Millisecond * 300}
-
+	timeoutMs := 300
+	if serverConfig.ClientTimeoutMs != 0 {
+		timeoutMs = serverConfig.ClientTimeoutMs
+	}
+	if timeoutMs != -1 {
+		netClient = &http.Client{Transport: &defaultTransport, Timeout: (time.Millisecond * time.Duration(timeoutMs))}
+	} else {
+		netClient = &http.Client{Transport: &defaultTransport}
+	}
 	ESIServerConfig = serverConfig
 	fmt.Printf("Starting HTTP\n")
 	router := http.NewServeMux()
