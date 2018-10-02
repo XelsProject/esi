@@ -535,10 +535,7 @@ func StartServer(address string, serverConfig ServerConfig) {
 	defaultTransport.MaxIdleConnsPerHost = 10
 	//defaultTransport.IdleConnTimeout = time.Second * 10
 
-	timeoutMs := 300
-	if serverConfig.ClientTimeoutMs != 0 {
-		timeoutMs = serverConfig.ClientTimeoutMs
-	}
+	timeoutMs := serverConfig.ClientTimeoutMs
 	if timeoutMs != -1 {
 		netClient = &http.Client{Transport: &defaultTransport, Timeout: (time.Millisecond * time.Duration(timeoutMs))}
 	} else {
