@@ -140,6 +140,8 @@ var hopHeaders = []string{
 	"Trailers",
 	"Transfer-Encoding",
 	"Upgrade",
+	"Content-Length",
+	"X-Content-Length",
 }
 
 func copyHeader(dst, src http.Header) {
